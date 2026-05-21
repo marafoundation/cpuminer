@@ -1,22 +1,19 @@
-#
-# Dockerfile for cpuminer
-# usage: docker run creack/cpuminer --url xxxx --user xxxx --pass xxxx
-# ex: docker run creack/cpuminer --url stratum+tcp://ltc.pool.com:80 --user creack.worker1 --pass abcdef
-#
-#
+FROM debian:bookworm-slim AS builder
 
-FROM            ubuntu:16.04
-MAINTAINER      Guillaume J. Charmes <guillaume@charmes.net>
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    automake libcurl4-openssl-dev libjansson-dev make gcc libtool && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN             apt-get update -qq && \
-                apt-get install -qqy automake libcurl4-openssl-dev git make gcc
+WORKDIR /cpuminer
+COPY . .
 
-RUN             git clone https://github.com/pooler/cpuminer
+RUN ./autogen.sh && \
+    ./configure CFLAGS="-O3" && \
+    make
 
-RUN             cd cpuminer && \
-                ./autogen.sh && \
-                ./configure CFLAGS="-O3" && \
-                make
-
-WORKDIR         /cpuminer
-ENTRYPOINT      ["./minerd"]
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcurl4 libjansson4 dnsutils && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=builder /cpuminer/minerd /usr/local/bin/minerd
+ENTRYPOINT ["minerd"]

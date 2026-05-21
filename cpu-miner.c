@@ -154,6 +154,9 @@ static unsigned long accepted_count = 0L;
 static unsigned long rejected_count = 0L;
 static double *thr_hashrates;
 
+static volatile unsigned int throttle_usec = 0;
+static char *opt_handicap_file = NULL;
+
 #ifdef HAVE_GETOPT_LONG
 #include <getopt.h>
 #else
@@ -252,6 +255,7 @@ static struct option const options[] = {
 	{ "user", 1, NULL, 'u' },
 	{ "userpass", 1, NULL, 'O' },
 	{ "version", 0, NULL, 'V' },
+	{ "handicap-file", 1, NULL, 1016 },
 	{ 0, 0, 0, 0 }
 };
 
@@ -1120,6 +1124,31 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 		diff_to_target(work->target, sctx->job.diff);
 }
 
+static void *handicap_watcher_thread(void *userdata)
+{
+	unsigned int last_value = 0;
+	int first = 1;
+
+	while (1) {
+		FILE *f = fopen(opt_handicap_file, "r");
+		if (f) {
+			unsigned int val = 0;
+			if (fscanf(f, "%u", &val) == 1) {
+				if (first || val != last_value) {
+					throttle_usec = val;
+					last_value = val;
+					if (!first)
+						applog(LOG_INFO, "Handicap updated from file: %uµs", val);
+					first = 0;
+				}
+			}
+			fclose(f);
+		}
+		sleep(1);
+	}
+	return NULL;
+}
+
 static void *miner_thread(void *userdata)
 {
 	struct thr_info *mythr = userdata;
@@ -1269,6 +1298,10 @@ static void *miner_thread(void *userdata)
 		/* if nonce found, submit work */
 		if (rc && !opt_benchmark && !submit_work(mythr, &work))
 			break;
+
+		/* runtime throttle: sleep between scan iterations */
+		if (throttle_usec)
+			usleep(throttle_usec);
 	}
 
 out:
@@ -1774,6 +1807,9 @@ static void parse_arg(int key, char *arg, char *pname)
 		}
 		strcpy(coinbase_sig, arg);
 		break;
+	case 1016:			/* --handicap-file */
+		opt_handicap_file = strdup(arg);
+		break;
 	case 'S':
 		use_syslog = true;
 		break;
@@ -1999,6 +2035,15 @@ int main(int argc, char *argv[])
 
 		if (have_stratum)
 			tq_push(thr_info[stratum_thr_id].q, strdup(rpc_url));
+	}
+
+	/* start handicap file watcher if configured */
+	if (opt_handicap_file) {
+		pthread_t handicap_pth;
+		if (pthread_create(&handicap_pth, NULL, handicap_watcher_thread, NULL))
+			applog(LOG_ERR, "handicap watcher thread create failed");
+		else
+			applog(LOG_INFO, "Watching handicap file: %s", opt_handicap_file);
 	}
 
 	/* start mining threads */
