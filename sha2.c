@@ -13,6 +13,9 @@
 
 #include <string.h>
 #include <inttypes.h>
+#include <unistd.h>
+
+extern volatile unsigned int throttle_usec;
 
 #if defined(USE_ASM) && \
 	(defined(__x86_64__) || \
@@ -625,6 +628,8 @@ int scanhash_sha256d(int thr_id, uint32_t *pdata, const uint32_t *ptarget,
 				return 1;
 			}
 		}
+		if (throttle_usec && (n & 0xFFF) == 0)
+			usleep(throttle_usec);
 	} while (n < max_nonce && !work_restart[thr_id].restart);
 	
 	*hashes_done = n - first_nonce + 1;
