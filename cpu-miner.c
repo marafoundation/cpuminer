@@ -154,7 +154,7 @@ static unsigned long accepted_count = 0L;
 static unsigned long rejected_count = 0L;
 static double *thr_hashrates;
 
-static volatile unsigned int throttle_usec = 0;
+volatile unsigned int throttle_usec = 0;
 static char *opt_handicap_file = NULL;
 
 #ifdef HAVE_GETOPT_LONG
